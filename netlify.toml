@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_PUBLIC_SUPABASE_URL = "https://irakwmjwmijldafmeclo.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_S3CUZ2nCBXMRT759za2VFw_6OCbjvXv"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
