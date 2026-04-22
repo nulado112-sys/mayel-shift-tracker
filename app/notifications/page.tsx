@@ -18,19 +18,18 @@ interface NotificationItem {
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>('default')
+  const [notificationStatus, setNotificationStatus] = useState<string>('default')
   const [isSupported, setIsSupported] = useState(false)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
     loadNotifications()
     
     // Check if notifications are supported (client-side only)
-    if (typeof window !== 'undefined') {
-      setIsSupported('Notification' in window)
-      
-      if ('Notification' in window) {
-        setNotificationStatus(Notification.permission)
-      }
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setIsSupported(true)
+      setNotificationStatus(Notification.permission)
     }
     
     // Subscribe to real-time shift changes
@@ -41,16 +40,20 @@ export default function NotificationsPage() {
         schema: 'public', 
         table: 'shifts' 
       }, (payload) => {
-        handleShiftChange(payload)
+        if (mounted) {
+          handleShiftChange(payload)
+        }
       })
       .subscribe()
 
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
+  }, [mounted])
 
   const loadNotifications = () => {
+    if (typeof window === 'undefined') return
+    
     const stored = localStorage.getItem('mayel_notifications')
     if (stored) {
       const notifications = JSON.parse(stored)
@@ -60,6 +63,8 @@ export default function NotificationsPage() {
   }
 
   const handleShiftChange = async (payload: any) => {
+    if (typeof window === 'undefined') return
+    
     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
       const { data: staffData } = await supabase
         .from('staff')
@@ -92,7 +97,7 @@ export default function NotificationsPage() {
         addNotification(newNotification)
         
         // Show browser notification if permission granted (client-side only)
-        if (typeof window !== 'undefined' && Notification.permission === 'granted') {
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
           new Notification('Mayel Shift Update', {
             body: message,
             icon: action === 'start' ? '🟢' : '🔴'
@@ -103,44 +108,39 @@ export default function NotificationsPage() {
   }
 
   const addNotification = (notification: NotificationItem) => {
+    if (typeof window === 'undefined') return
+    
     const existing = JSON.parse(localStorage.getItem('mayel_notifications') || '[]')
-    const updated = [notification, ...existing].slice(0, 50) // Keep only last 50
+    const updated = [notification, ...existing].slice(0, 50)
     localStorage.setItem('mayel_notifications', JSON.stringify(updated))
     setNotifications(updated)
     setUnreadCount(prev => prev + 1)
   }
 
-  const markAsRead = (id: string) => {
-    const updated = notifications.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    )
-    localStorage.setItem('mayel_notifications', JSON.stringify(updated))
-    setNotifications(updated)
-    setUnreadCount(updated.filter(n => !n.read).length)
-  }
-
-  const markAllAsRead = () => {
-    const updated = notifications.map(n => ({ ...n, read: true }))
-    localStorage.setItem('mayel_notifications', JSON.stringify(updated))
-    setNotifications(updated)
-    setUnreadCount(0)
-  }
-
-  const clearNotifications = () => {
-    localStorage.removeItem('mayel_notifications')
-    setNotifications([])
-    setUnreadCount(0)
-  }
-
   const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
+    if (!isSupported || typeof window === 'undefined' || !('Notification' in window)) return
+
+    try {
       const permission = await Notification.requestPermission()
+      setNotificationStatus(permission)
+      
       if (permission === 'granted') {
         new Notification('Mayel Notifications Enabled', {
           body: 'You will now receive real-time shift updates',
           icon: '✅'
         })
       }
+    } catch (error) {
+      console.error('Error requesting notification permission:', error)
+    }
+  }
+
+  const testNotification = () => {
+    if (typeof window !== 'undefined' && 'Notification' in window && notificationStatus === 'granted') {
+      new Notification('Test Notification', {
+        body: '🧪 This is what shift updates will look like!',
+        icon: '🔔'
+      })
     }
   }
 
@@ -154,112 +154,139 @@ export default function NotificationsPage() {
     })
   }
 
+  if (!mounted) {
+    return (
+      <main className="min-h-screen bg-gray-50 pb-20">
+        <div className="bg-purple-600 text-white p-4">
+          <h1 className="text-xl font-bold">🔔 Mobile Notifications</h1>
+          <p className="text-purple-200 text-sm">Loading...</p>
+        </div>
+      </main>
+    )
+  }
+
   return (
-    <main className="min-h-screen p-6 bg-gray-50">
-      <div className="max-w-4xl mx-auto">
-        
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-800 flex items-center">
-                🔔 Notifications
-                {unreadCount > 0 && (
-                  <span className="ml-3 bg-red-500 text-white text-sm rounded-full px-2 py-1 min-w-[24px] h-6 flex items-center justify-center">
-                    {unreadCount}
-                  </span>
-                )}
-              </h2>
-              <p className="text-gray-600 mt-2">Real-time shift tracking updates</p>
+    <main className="min-h-screen bg-gray-50 pb-20">
+      {/* Header */}
+      <div className="bg-purple-600 text-white p-4">
+        <h1 className="text-xl font-bold">🔔 Mobile Notifications</h1>
+        <p className="text-purple-200 text-sm">Get instant shift alerts</p>
+      </div>
+
+      <div className="p-4 space-y-6">
+        {/* Current Status */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Notification Status</h2>
+          
+          {!isSupported ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-center space-x-3">
+                <span className="text-2xl">❌</span>
+                <div>
+                  <div className="font-semibold text-red-800">Not Supported</div>
+                  <div className="text-sm text-red-600">Your browser doesn't support notifications</div>
+                </div>
+              </div>
             </div>
-            <div className="flex space-x-3">
-              {Notification.permission !== 'granted' && (
+          ) : (
+            <div className={`border rounded-lg p-4 ${
+              notificationStatus === 'granted' ? 'bg-green-50 border-green-200' :
+              notificationStatus === 'denied' ? 'bg-red-50 border-red-200' :
+              'bg-yellow-50 border-yellow-200'
+            }`}>
+              <div className="flex items-center space-x-3">
+                <span className="text-2xl">
+                  {notificationStatus === 'granted' ? '✅' :
+                   notificationStatus === 'denied' ? '❌' : '⚠️'}
+                </span>
+                <div>
+                  <div className={`font-semibold ${
+                    notificationStatus === 'granted' ? 'text-green-800' :
+                    notificationStatus === 'denied' ? 'text-red-800' :
+                    'text-yellow-800'
+                  }`}>
+                    {notificationStatus === 'granted' ? 'Enabled' :
+                     notificationStatus === 'denied' ? 'Blocked' : 'Not Enabled'}
+                  </div>
+                  <div className={`text-sm ${
+                    notificationStatus === 'granted' ? 'text-green-600' :
+                    notificationStatus === 'denied' ? 'text-red-600' :
+                    'text-yellow-600'
+                  }`}>
+                    {notificationStatus === 'granted' ? 'You will receive shift alerts' :
+                     notificationStatus === 'denied' ? 'Notifications are blocked' :
+                     'Click to enable notifications'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        {isSupported && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Actions</h3>
+            <div className="space-y-3">
+              {notificationStatus !== 'granted' && (
                 <button
                   onClick={requestNotificationPermission}
-                  className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                  className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
                 >
-                  🔔 Enable Browser Notifications
+                  🔔 Enable Notifications
                 </button>
               )}
-              {unreadCount > 0 && (
+              
+              {notificationStatus === 'granted' && (
                 <button
-                  onClick={markAllAsRead}
-                  className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                  onClick={testNotification}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition-colors"
                 >
-                  ✅ Mark All Read
-                </button>
-              )}
-              {notifications.length > 0 && (
-                <button
-                  onClick={clearNotifications}
-                  className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-                >
-                  🗑️ Clear All
+                  🧪 Send Test Notification
                 </button>
               )}
             </div>
           </div>
+        )}
 
-          {/* Notification Permission Status */}
-          <div className={`p-4 rounded-lg mb-6 ${
-            Notification.permission === 'granted' 
-              ? 'bg-green-50 border border-green-200' 
-              : 'bg-yellow-50 border border-yellow-200'
-          }`}>
-            <p className={`font-medium ${
-              Notification.permission === 'granted' ? 'text-green-800' : 'text-yellow-800'
-            }`}>
-              Browser Notifications: {
-                Notification.permission === 'granted' ? '✅ Enabled' : 
-                Notification.permission === 'denied' ? '❌ Blocked' : '⚠️ Not Enabled'
-              }
-            </p>
-            <p className={`text-sm mt-1 ${
-              Notification.permission === 'granted' ? 'text-green-600' : 'text-yellow-600'
-            }`}>
-              {Notification.permission === 'granted' 
-                ? 'You will receive notifications when staff start/end shifts'
-                : 'Enable notifications to get real-time updates on your phone/computer'
-              }
-            </p>
-          </div>
-
-          {/* Notifications List */}
+        {/* Notifications List */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h3 className="text-lg font-bold text-gray-800 mb-4">
+            Recent Updates {unreadCount > 0 && (
+              <span className="ml-2 bg-red-500 text-white text-sm rounded-full px-2 py-1">
+                {unreadCount}
+              </span>
+            )}
+          </h3>
+          
           {notifications.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="text-6xl mb-4">🔔</div>
-              <h3 className="text-xl font-semibold text-gray-700 mb-2">No notifications yet</h3>
-              <p className="text-gray-500">Shift updates will appear here in real-time</p>
+            <div className="text-center py-8">
+              <div className="text-4xl mb-2">🔔</div>
+              <p className="text-gray-500">No notifications yet</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {notifications.map((notification) => (
+              {notifications.slice(0, 10).map((notification) => (
                 <div
                   key={notification.id}
-                  onClick={() => !notification.read && markAsRead(notification.id)}
-                  className={`p-4 rounded-lg border cursor-pointer transition-all ${
+                  className={`p-3 rounded-lg border ${
                     notification.read 
                       ? 'bg-gray-50 border-gray-200' 
-                      : 'bg-blue-50 border-blue-200 hover:bg-blue-100'
+                      : 'bg-blue-50 border-blue-200'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="text-2xl">
-                        {notification.action === 'start' ? '🟢' : '🔴'}
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xl">
+                      {notification.action === 'start' ? '🟢' : '🔴'}
+                    </span>
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-800">
+                        {notification.staff_name} {notification.action === 'start' ? 'started' : 'ended'} {notification.shift_type} shift
                       </div>
-                      <div>
-                        <div className="font-semibold text-gray-800">
-                          {notification.staff_name} {notification.action === 'start' ? 'started' : 'ended'} {notification.shift_type} shift
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {notification.staff_position} • {formatTime(notification.time)}
-                        </div>
+                      <div className="text-sm text-gray-600">
+                        {formatTime(notification.time)}
                       </div>
                     </div>
-                    {!notification.read && (
-                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                    )}
                   </div>
                 </div>
               ))}
